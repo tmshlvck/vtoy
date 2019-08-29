@@ -1,0 +1,20 @@
+---
+- hosts: vmnodes
+  name: prepare vmnodes
+  become: yes
+  tasks:
+    - name: install kvm and libvirt
+      apt:
+        name:
+          - qemu-kvm
+          - qemu-utils
+          - libvirt-daemon-system
+          - libvirt-daemon
+          - virtinst
+          - bridge-utils
+          - libosinfo-bin
+          - libguestfs-tools
+          - virt-top
+        state: present
+        update_cache: yes
+
