@@ -61,9 +61,10 @@ def main():
             inp = set()
             for l in ifh.readlines():
                 uri = l.strip()
-                if not checkuri(uri):
-                    raise TypeError("URI %s failed to parse" % uri)
-                inp.add(uri)
+                if uri:
+                    if not checkuri(uri):
+                        raise TypeError("URI %s failed to parse" % uri)
+                    inp.add(uri)
             write(list(inp))
         return
 
