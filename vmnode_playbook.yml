@@ -18,3 +18,209 @@
         state: present
         update_cache: yes
 
+- hosts: 127.0.0.1
+  name: prepare TLS
+  connection: local
+  tasks:
+    - name: create tls dir
+      file:
+        path: "{{ playbook_dir }}/tls/"
+        state: directory
+        mode: '0755'
+          
+    - name: create ca-key
+      shell: certtool --generate-privkey >"{{ playbook_dir }}/tls/certificate_authority_key.pem"
+      args:
+        creates: "{{ playbook_dir }}/tls/certificate_authority_key.pem"
+
+    - name: create ca-cert template
+      copy:
+        dest: "{{ playbook_dir }}/tls/certificate_authority_template.info"
+        content: |
+          cn = ignum.cz
+          ca
+          cert_signing_key
+          expiration_days = 36500
+
+    - name: create ca-cert
+      shell: certtool --generate-self-signed \
+            --template "{{ playbook_dir }}/tls/certificate_authority_template.info" \
+            --load-privkey "{{ playbook_dir }}/tls/certificate_authority_key.pem" \
+            --outfile "{{ playbook_dir }}/tls/certificate_authority_certificate.pem"
+      args:
+        creates: "{{ playbook_dir }}/tls/certificate_authority_certificate.pem"
+
+    - name: create server-key
+      shell: certtool --generate-privkey >"{{ playbook_dir }}/tls/{{ hostvars[item].inventory_hostname_short }}_server_key.pem"
+      args:
+        creates: "{{ playbook_dir }}/tls/{{ hostvars[item].inventory_hostname_short }}_server_key.pem"
+      with_items: "{{ groups['vmnodes'] }}"
+
+    - name: create server-cert template
+      copy:
+        dest: "{{ playbook_dir }}/tls/{{ hostvars[item].inventory_hostname_short }}_server_template.info"
+        content: |
+          organization = ignum.cz
+          cn = {{ item }}
+          tls_www_server
+          encryption_key
+          signing_key
+          expiration_days = 36500
+      with_items: "{{ groups['vmnodes'] }}"
+
+    - name: create server-cert
+      shell: certtool --generate-certificate \
+            --template "{{ playbook_dir }}/tls/{{ hostvars[item].inventory_hostname_short }}_server_template.info" \
+            --load-privkey "{{ playbook_dir }}/tls/{{ hostvars[item].inventory_hostname_short }}_server_key.pem" \
+            --load-ca-certificate "{{ playbook_dir }}/tls/certificate_authority_certificate.pem" \
+            --load-ca-privkey "{{ playbook_dir }}/tls/certificate_authority_key.pem" \
+            --outfile "{{ playbook_dir }}/tls/{{ hostvars[item].inventory_hostname_short }}_server_certificate.pem"
+      args:
+        creates: "{{ playbook_dir }}/tls/{{ hostvars[item].inventory_hostname_short }}_server_certificate.pem"
+      with_items: "{{ groups['vmnodes'] }}"
+
+    - name: create server-key
+      shell: certtool --generate-privkey >"{{ playbook_dir }}/tls/{{ hostvars[item].inventory_hostname_short }}_server_key.pem"
+      args:
+        creates: "{{ playbook_dir }}/tls/{{ hostvars[item].inventory_hostname_short }}_server_key.pem"
+      with_items: "{{ groups['vmnodes'] }}"
+
+    - name: create server-cert template
+      copy:
+        dest: "{{ playbook_dir }}/tls/{{ hostvars[item].inventory_hostname_short }}_server_template.info"
+        content: |
+          organization = ignum.cz
+          cn = {{ item }}
+          tls_www_server
+          encryption_key
+          signing_key
+          expiration_days = 36500
+      with_items: "{{ groups['vmnodes'] }}"
+
+    - name: create server-cert
+      shell: certtool --generate-certificate \
+            --template "{{ playbook_dir }}/tls/{{ hostvars[item].inventory_hostname_short }}_server_template.info" \
+            --load-privkey "{{ playbook_dir }}/tls/{{ hostvars[item].inventory_hostname_short }}_server_key.pem" \
+            --load-ca-certificate "{{ playbook_dir }}/tls/certificate_authority_certificate.pem" \
+            --load-ca-privkey "{{ playbook_dir }}/tls/certificate_authority_key.pem" \
+            --outfile "{{ playbook_dir }}/tls/{{ hostvars[item].inventory_hostname_short }}_server_certificate.pem"
+      args:
+        creates: "{{ playbook_dir }}/tls/{{ hostvars[item].inventory_hostname_short }}_server_certificate.pem"
+      with_items: "{{ groups['vmnodes'] }}"
+
+    - name: create manager-key
+      shell: certtool --generate-privkey >"{{ playbook_dir }}/tls/manager_key.pem"
+      args:
+        creates: "{{ playbook_dir }}/tls/manager_key.pem"
+
+    - name: create manager-cert template
+      copy:
+        dest: "{{ playbook_dir }}/tls/manager_template.info"
+        content: |
+          organization = ignum.cz
+          cn = lin@ignum.cz
+          tls_www_client
+          encryption_key
+          signing_key
+          expiration_days = 36500
+
+    - name: create server-cert
+      shell: certtool --generate-certificate \
+            --template "{{ playbook_dir }}/tls/manager_template.info" \
+            --load-privkey "{{ playbook_dir }}/tls/manager_key.pem" \
+            --load-ca-certificate "{{ playbook_dir }}/tls/certificate_authority_certificate.pem" \
+            --load-ca-privkey "{{ playbook_dir }}/tls/certificate_authority_key.pem" \
+            --outfile "{{ playbook_dir }}/tls/manager_certificate.pem"
+      args:
+        creates: "{{ playbook_dir }}/tls/manager_certificate.pem"
+
+
+
+
+    
+- hosts: vmnodes
+  name: deploy vmnode certs
+  become: yes
+  tasks:
+    - name: create CA dir
+      file:
+        path: "/etc/pki/CA/"
+        state: directory
+        mode: '0755'
+
+    - name: deploy ca-cert
+      copy:
+        src: "{{playbook_dir}}/tls/certificate_authority_certificate.pem"
+        dest: /etc/pki/CA/cacert.pem
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: create libvirt dir
+      file:
+        path: "/etc/pki/libvirt/private"
+        state: directory
+        mode: '0755'
+
+    - name: deploy server-key
+      copy:
+        src: "{{ playbook_dir }}/tls/{{ inventory_hostname_short }}_server_key.pem"
+        dest: /etc/pki/libvirt/private/serverkey.pem
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: deploy server-cert
+      copy:
+        src: "{{ playbook_dir }}/tls/{{ inventory_hostname_short }}_server_certificate.pem"
+        dest: /etc/pki/libvirt/servercert.pem
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: enable libvirt listen
+      lineinfile:
+         path: /etc/default/libvirtd
+         regexp: '^[#\s]*libvirtd_opts='
+         line: libvirtd_opts="--listen"
+
+    - name: restart libvirtd
+      service:
+         name: libvirtd
+         state: restarted
+
+
+- hosts: vmnode_manager
+  name: deploy vmnode manager certs
+  become: yes
+  tasks:
+    - name: deploy ca-cert
+      copy:
+        src: "{{playbook_dir}}/tls/certificate_authority_certificate.pem"
+        dest: /etc/pki/CA/cacert.pem
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: deploy manager-key
+      copy:
+        src: "{{ playbook_dir }}/tls/manager_key.pem"
+        dest: /etc/pki/libvirt/private/clientkey.pem
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: deploy manager-cert
+      copy:
+        src: "{{ playbook_dir }}/tls/manager_certificate.pem"
+        dest: /etc/pki/libvirt/clientcert.pem
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: restart libvirtd
+      service:
+         name: libvirtd
+         state: restarted
+
+
