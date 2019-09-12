@@ -180,7 +180,8 @@ def migrate(suri, duri, dom_name, force=False):
 
     print("Found src domain %s in state %s" % (sdom.name(), str(sdom.state())))
 
-    for bd_pool, bd_name in list_blkdevs(srcconn, dom_name):
+    blkdevs = list(list_blkdevs(srcconn, dom_name))
+    for bd_pool, bd_name in blkdevs:
         print("Found blockdev /dev/%s/%s" % (bd_pool, bd_name))
         vname, vtype, vsize = get_lv(srcconn, bd_pool, bd_name)
         if vtype != libvirt.VIR_STORAGE_VOL_BLOCK:
@@ -199,9 +200,10 @@ def migrate(suri, duri, dom_name, force=False):
     print("Migration started...")
     do_migrate(srcconn, dstconn, dom_name)
     print("Migration finished.")
-        
-    destroy_lv(srcconn, bd_pool, bd_name)
-    print("Removed storage on src host.")
+
+    for bd_pool, bd_name in blkdevs:
+        destroy_lv(srcconn, bd_pool, bd_name)
+        print("Removed storage /dev/%s/%s on src host." % (bd_pool, bd_name))
 
     srcconn.close()
     dstconn.close()
