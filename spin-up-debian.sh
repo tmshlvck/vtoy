@@ -1,6 +1,6 @@
 #!/bin/bash
 
-CLOUDIMAGE="/var/lib/libvirt/images/debian-10.0.3-20190815-openstack-amd64.qcow2"
+CLOUDIMAGE="/var/lib/libvirt/images/debian-10.1.0-openstack-amd64" # .qcow2 or .raw
 DEF_DISKSIZE="10G"
 IMAGEDIR="/var/lib/libvirt/images/"
 NET="br22"
@@ -8,8 +8,8 @@ NET="br22"
 STORAGE="lvm"
 VG="vg0"
 
-if [ "$#" -lt 2 ]; then
-    echo "Usage: $1 <virthostname> [disksize]"
+if [ "$#" -lt 1 ]; then
+    echo "Usage: $0 <virthostname> [disksize]"
     exit
 fi
 
@@ -33,17 +33,17 @@ CIMG="$IMAGEDIR/${1}-config.iso"
 mv $CIDIR/config.iso $IMAGEDIR/${1}-config.iso
 rm -rf $CIDIR
 
-if [[ $STORAGE == "qcow2" ]]
+if [[ $STORAGE == "qcow2" ]]; then
   IMG="${IMAGEDIR}/${1}.qcow2"
-  cp $CLOUDIMAGE $IMG
+  cp ${CLOUDIMAGE}.qcow2 $IMG
   qemu-img resize $IMG ${2:-$DEF_DISKSIZE}
   DISK="path=$IMG"
 fi
 
-if [[ $STORAGE == "lvm" ]]
+if [[ $STORAGE == "lvm" ]]; then
   DEV="/dev/${VG}/${1}"
   lvcreate -L${2:-$DEF_DISKSIZE} -n ${1} ${VG}
-  dd if=$CLOUDIMAGE of=$DEV bs=1M
+  dd if=${CLOUDIMAGE}.raw of=$DEV bs=1M
   DISK="path=$DEV"
 fi
 
@@ -54,8 +54,8 @@ if [ -z "${DISK}" ]; then
 fi
 
 
-
-virt-install --connect qemu:///system \
+if [ -n "${NET}" ]; then
+	virt-install --connect qemu:///system \
          -n $1 \
          -r 1024 \
          --import \
@@ -64,6 +64,17 @@ virt-install --connect qemu:///system \
 	 --network bridge=${NET},model=virtio \
 	 --os-type=linux \
 	 --os-variant=debiantesting \
-	 --graphics spice
+	 --graphics spice \
 	 --cpu Nehalem-IBRS
-
+else
+	virt-install --connect qemu:///system \
+         -n $1 \
+         -r 1024 \
+         --import \
+         --disk $DISK \
+         --disk path=${CIMG} \
+	 --os-type=linux \
+	 --os-variant=debiantesting \
+	 --graphics spice \
+	 --cpu Nehalem-IBRS
+fi
