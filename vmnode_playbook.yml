@@ -189,23 +189,14 @@
          name: libvirtd
          state: restarted
 
-    - name: download debian-10.0.3-20190815-openstack-amd64.raw
+    - name: download debian openstack image
       get_url:
-        url: https://cdimage.debian.org/cdimage/openstack/current/debian-10.0.3-20190815-openstack-amd64.raw
+        url: https://cdimage.debian.org/cdimage/openstack/current/debian-10.1.0-openstack-amd64.raw
         dest: /var/lib/libvirt/images/
         mode: '0644'
         owner: root
         group: root
-        checksum: md5:720fc9bd3069b6669dd1fb945653c7fd
-
-    - name: download debian-10.0.3-20190815-openstack-amd64.qcow2
-      get_url:
-        url: https://cdimage.debian.org/cdimage/openstack/current/debian-10.0.3-20190815-openstack-amd64.qcow2
-        dest: /var/lib/libvirt/images/
-        mode: '0644'
-        owner: root
-        group: root
-        checksum: md5:a9f40a6a36019641685aa83545862ffe
+        checksum: md5:d1adc1dacdd1c6e8d50f29b9b78a73e0
 
   # TODO:
   #   - LVM + pool creation in libvirt
