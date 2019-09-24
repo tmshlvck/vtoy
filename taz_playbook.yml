@@ -1,0 +1,499 @@
+---
+- hosts: taz.v.ignum.cz
+  name: prepare vtoy master
+  become: yes
+  tasks:
+    - name: disable cloud-init
+      file:
+        path: /etc/cloud/cloud-init.disabled
+        state: touch
+        mode: '644'
+        modification_time: preserve
+        access_time: preserve
+
+    - name: setup network
+      copy:
+        dest: /etc/network/interfaces
+        content: |
+          # This file describes the network interfaces available on your system
+          # and how to activate them. For more information, see interfaces(5).
+
+          # The loopback network interface
+          auto lo
+          iface lo inet loopback
+
+          # The normal eth0
+          allow-hotplug eth0
+          iface eth0 inet static
+              address 62.109.152.16
+              netmask 255.255.248.0
+              gateway 62.109.152.1
+
+          iface eth0 inet6 static
+              address 2001:1ab0:0010:0100::0001:0010
+              netmask 64
+
+    - name: remove debian cloud-init user
+      user:
+        name: debian
+        state: absent
+        remove: yes
+
+    - name: install kvm and libvirt
+      apt:
+        name:
+          - qemu-kvm
+          - qemu-utils
+          - libvirt-daemon-system
+          - libvirt-daemon
+          - virtinst
+          - bridge-utils
+          - libosinfo-bin
+          - libguestfs-tools
+          - virt-top
+        state: present
+        update_cache: yes
+
+    - name: install PXE infrastructure
+      apt:
+        name:
+          - isc-dhcp-server
+          - tftpd-hpa
+          - di-netboot-assistant
+        state: present
+
+    - name: setup DHCP
+      copy:
+        dest: /etc/dhcp/dhcpd.conf
+        content: |
+          ddns-update-style none;
+          default-lease-time 600;
+          max-lease-time 7200;
+          
+          allow booting;
+          
+          option arch code 93 = unsigned integer 16;
+          
+          subnet 62.109.152.0 netmask 255.255.248.0 {
+             range 62.109.152.10 62.109.152.15 ;
+             option routers 62.109.152.1;
+             option domain-name-servers 217.31.53.53;
+             option domain-name "v.ignum.cz";
+             allow unknown-clients;
+             next-server 62.109.152.16;
+             if option arch = 00:07 {
+               filename "d-i/n-a/bootnetx64.efi";
+             } else {
+               filename "d-i/n-a/pxelinux.0";
+             }
+          }
+ 
+    - name: setup DHCPv6
+      copy:
+        dest: /etc/dhcp/dhcpd6.conf
+        content: |
+          default-lease-time 2592000;
+          preferred-lifetime 604800;
+          option dhcp-renewal-time 3600;
+          option dhcp-rebinding-time 7200;
+
+          allow leasequery;
+
+
+          option dhcp6.bootfile-url code 59 = string;
+          option dhcp6.client-arch-type code 61 = array of unsigned integer 16;
+
+          option dhcp6.name-servers 2001:1ab0:b0f4:53::53;
+          option dhcp6.domain-search "v.ignum.cz","ignum.cz";
+
+          if option dhcp6.client-arch-type = 00:07 {
+            option dhcp6.bootfile-url "tftp://[2001:1ab0:10:100::1:10]/bootx64.efi";
+          } else {
+            option dhcp6.bootfile-url "tftp://[2001:1ab0:10:100::1:10]/pxelinux.0";
+          }
+
+          subnet6 2001:1ab0:10:100::/64 {
+            range6 2001:1ab0:10:100::1:100 2001:1ab0:10:100::1:ffff;
+          }
+
+ 
+    
+    - name: set dhcp listen interfaces IPv4
+      lineinfile:
+        path: /etc/default/isc-dhcp-server
+        regexp: '^INTERFACESv4='
+        line: 'INTERFACESv4="eth0"'
+
+#    - name: set dhcp listen interfaces IPv6
+#      lineinfile:
+#        path: /etc/default/isc-dhcp-server
+#        regexp: '^INTERFACESv6='
+#        line: 'INTERFACESv6="eth0"'
+
+
+    - name: restart isc-dhcp-server
+      service:
+        name: isc-dhcp-server
+        state: restarted
+
+
+    - name: create d-i structure
+      file:
+        path: /srv/tftp/d-i/buster/
+        state: directory
+        recurse: yes
+        owner: root
+        group: root
+
+
+    - name: setup preseed
+      copy:
+        dest: /srv/tftp/d-i/buster/preseed.cfg
+        content: |
+          #### Preconfiguration file
+          ##
+          ##  The following preseeding might be used to install a basic system
+          ##  completely automatically.
+          ##
+          ##  A user 'ansible' is set up and ssh login with public key
+          ##  authentication is configured.  The idea is to allow further
+          ##  customization of the system after installation using ansible.
+          ##
+          ##  Modify at least the public ssh key in 'authorized_keys' (see
+          ##  below).
+          ##
+          ##  For more examples and comments consult:
+          ##    https://www.debian.org/releases/stable/example-preseed.txt
+          ##
+          
+          ## To change default values:
+          #d-i foo/bar seen false
+          #d-i foo/bar string value
+          
+          ## Useful boot parameters:
+          ## DEBCONF_DEBUG=5
+          ## locale?=de_DE
+          
+          # Preseeding only locale sets language, country and locale:
+          d-i debian-installer/locale string en_US
+          d-i keyboard-configuration/xkb-keymap select en
+          
+          ## Use hostname assigned by DHCP:
+          d-i netcfg/get_hostname string unassigned-hostname
+          d-i netcfg/get_domain string v.ignum.cz
+          
+          ## Skip root account:
+          d-i passwd/root-login boolean false
+          
+          ### Apt setup
+          d-i apt-setup/non-free boolean true
+          d-i apt-setup/contrib boolean true
+          
+          d-i mirror/country string manual
+          #d-i mirror/http/hostname string deb.debian.org
+          d-i mirror/http/hostname string debian.ignum.cz
+          d-i mirror/http/directory string /debian
+          d-i mirror/http/proxy string
+          
+          ### Backports:
+          #apt-setup-udeb apt-setup/services-select multiselect security, updates, backports
+          
+          ### Ansible User
+          d-i passwd/user-fullname string Ansible User
+          d-i passwd/username string ansible
+          d-i passwd/user-password password insecure
+          d-i passwd/user-password-again password insecure
+          #d-i passwd/user-password-crypted password [crypt(3) hash]
+          
+          ##################################################################################
+          ###################### Partitioning hell....... ##################################
+          
+          d-i partman/choose_label string gpt
+          d-i partman/default_label string gpt
+          d-i partman/confirm_write_new_label boolean true
+          
+          d-i partman-basicfilesystems/choose_label string gpt
+          d-i partman-basicfilesystems/default_label string gpt
+          d-i partman-partitioning/choose_label string gpt
+          d-i partman-partitioning/default_label string gpt
+          d-i partman/choose_label string gpt
+          d-i partman/default_label string gpt
+          partman-partitioning partman-partitioning/choose_label select gpt
+          d-i partman/confirm_write_new_label boolean true
+          
+          
+          d-i partman/early_command string \
+              COUNT=0; \
+              for DISK in $(list-devices disk | sort | head -n2); do \
+                  DISKS="${DISKS} ${DISK}"; \
+                  if [ "$(echo ${DISK} | cut -d'/' -f3)" = "cciss" ]; then \
+                      DEVS="${DEVS}${DISK}p2#"; \
+                  else \
+                      DEVS="${DEVS}${DISK}2#"; \
+                  fi; \
+                  COUNT=$((COUNT + 1)); \
+              done; \
+              DISKS=$(echo ${DISKS} | sed "s/^ //g"); \
+              DEVS=$(echo ${DEVS} | sed "s/#$//g"); \
+              debconf-set partman-auto/disk "$DISKS"; \
+              echo "Set disks $DISKS count ${COUNT}"; \
+              if [ "${COUNT}" -ge "2" ]; then \
+                  debconf-set partman-auto/method "raid"; \
+                  debconf-set partman-auto-raid/recipe "1 2 0 ext4 / ${DEVS} ."; \
+                  if [ -d "/sys/firmware/efi/" ]; then \
+                      debconf-set partman-auto/expert_recipe "multiraid :: \
+                          128 256 256 free \
+                              \$gptonly{ } \
+                              \$primary{ } \
+                              \$reusemethod{ } \
+                              method{ efi } \
+                              format{ } . \
+                          8192 8192 10240 raid \
+                              \$gptonly{ } \
+                              \$primary { } \
+                              \$bootable{ } \
+                              method{ raid } . \
+                          1 1 -1 raid \
+                              \$gptonly{ } \
+                              \$primary{ } \
+                              method{ raid } . ";\
+                  else \
+                      debconf-set partman-auto/expert_recipe "multiraid :: \
+                          1 1 1 free \
+                              \$gptonly{ } \
+                              \$primary{ } \
+                              \$bios_boot{ } \
+                              method{ biosgrub } . \
+                          8192 8192 10240 raid \
+                              \$gptonly{ } \
+                              \$primary{ } \
+                              \$bootable{ } \
+                              method{ raid } . \
+                          1 1 -1 raid \
+                              \$gptonly{ } \
+                              \$primary{ } \
+                              method{ raid } . ";\
+                   fi; \
+              else \
+                  debconf-set partman-auto/method "regular"; \
+                  if [ -d "/sys/firmware/efi/" ]; then \
+                      debconf-set partman-auto/expert_recipe "boot-root :: \
+                          128 256 256 free \
+                              \$gptonly{ } \
+                              \$primary{ } \
+                              \$reusemethod{ } \
+                              method{ efi } \
+                              format{ } . \
+                          8192 8192 10240 ext4 \
+                              \$gptonly{ } \
+                              \$primary { } \
+                              \$bootable{ } \
+                              method{ format } format{ } \
+                              use_filesystem{ } filesystem{ ext4 } \
+                              mountpoint{ / } . \
+                          1 1 -1 lvm \
+                              \$gptonly{ } \
+                              \$primary{ } \
+                              method{ lvm } . ";\
+                  else \
+                      debconf-set partman-auto/expert_recipe "boot-root :: \
+                          1 1 1 free \
+                              \$gptonly{ } \
+                              \$primary{ } \
+                              \$bios_boot{ } \
+                              method{ biosgrub } . \
+                          8192 8192 10240 ext4 \
+                              \$gptonly{ } \
+                              \$primary{ } \
+                              \$bootable{ } \
+                              method{ format } format{ } \
+                              use_filesystem{ } filesystem{ ext4 } \
+                              mountpoint{ / } . \
+                          1 1 -1 lvm \
+                              \$gptonly{ } \
+                              \$primary{ } \
+                              method{ lvm } . ";\
+                  fi; \
+              fi
+          
+          # Ignore missing swap
+          d-i partman-basicfilesystems/no_swap boolean false
+          
+          # Install grub in the first device (assuming it is not a USB stick)
+          d-i grub-installer/bootdev string default
+          
+          
+          # Remove existing software RAID partitions?
+          d-i partman-md/device_remove_md boolean true
+          
+          # Dummy template for preseeding unavailable questions
+          d-i partman-auto/purge_lvm_from_device boolean true
+          
+          # Write the changes to the storage devices and configure RAID?
+          d-i partman-md/confirm boolean true
+          d-i partman-md/confirm_nooverwrite boolean true
+          
+          # Write the changes to disks and configure LVM?
+          d-i partman-lvm/confirm boolean true
+          d-i partman-lvm/device_remove_lvm boolean true
+          d-i partman-lvm/confirm_nooverwrite boolean true
+          
+          # Write the changes to disks? ######### for debug comment out 3 lines below
+          d-i partman/confirm boolean true
+          d-i partman/confirm_nooverwrite boolean true
+          
+          # Finish partitioning and write changes to disk
+          d-i partman/choose_partition select finish
+          
+          
+          
+          
+          ############################# End of hell ########################################
+          
+          ### Package selection
+          #tasksel tasksel/first multiselect standard, ssh-server, gnome-desktop, print-server
+          tasksel tasksel/first multiselect standard, ssh-server
+          
+          ### Individual additional packages to install
+          #d-i pkgsel/include string firmware-linux ansible git
+          #d-i pkgsel/include string firmware-linux ansible/stretch-backports git
+          d-i pkgsel/include string firmware-linux
+          
+          ### GRUB on default disk:
+          d-i grub-installer/bootdev string default
+          
+          ### This command is run just before the install finishes:
+          d-i preseed/late_command string \
+                mkdir -p /target/home/ansible/.ssh && \
+                echo "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCeQg5TjzWeCC3v1meyx8sCcHi9G8mPD1J7o5R4WQYQrplfuALwAJ5v9Ne2lqZDzvQui7QvjfzkRTe/jGR35VKbOGYeaMkQ0tUEM8HimCIcjxdvdZEwGaAbMA2u3L0OXqozSmfZIURGzjf53qIkpAXkUSRrGFl0CEkWZpgDTgVTktJ7SqMnl981jAWDTHLCW7Vf+Fx+GnU1tvafWVw3qk/fTna7fobvg39fG6Ja7JqVF/qw4v74OtRfQjj6TLF03vAhdMmDPr2BVUvizVAhtqqUaJEMwF0yUIrohaDpIwiIx14op+6s9ecoj6wFrrPwknPt1xkPrd5N2VJGls+dkvEQK/GC7d8NNaXKQwQ1i9loMUhbGyalqSYCFVnYriAQMANTdqLBoLo/wqGagillgGtgZhIKIcpA+RgJ8I0FfpdDqAsrT9S9BUKMMpd9Eai9SiWmHq38XqjQwpfBEqg9hTcAwq80k9yv/Af5yJD7416N7xwRn5l4kBXbYdP5Ezwlm6yGY25OQEuz2n6izY2lZ3nHDuADsvRddpt4RdBSVDePAXeDl4nH42YxGAbgWb/vCx7RFQNdcl7F1iz3N98gaTKCOIwmqyJ3TmBp47A8Trwtol7FEpzUDI/2elOgOo2FvwlO7mp4ZAjkcFW15ca0UMCEjxx49PQ5V62Q+3DcOgGLRw== tmshlvck@gmail.com" >> /target/home/ansible/.ssh/authorized_keys ; \
+                in-target chown -R ansible:ansible /home/ansible/.ssh/ ; \
+                in-target chmod -R og= /home/ansible/.ssh/
+          #
+          ### Avoid that last message about the install being complete.
+          d-i finish-install/reboot_in_progress note
+
+
+    - name: set dhcp listen interfaces IPv4
+      lineinfile:
+        path: /etc/di-netboot-assistant/di-netboot-assistant.conf
+        regexp: '^TFTP_ROOT='
+        line: 'TFTP_ROOT=/srv/tftp'
+
+
+    - name: exec di-netboot-assistant install stable
+      shell: di-netboot-assistant install stable
+
+    - name: configure grub for UEFI
+      blockinfile:
+        path: /etc/di-netboot-assistant/grub.cfg.HEAD
+        block: |
+          menuentry 'EFI Debian stable (amd64) + preseed' {
+            linux   /d-i/n-a/stable/amd64/linux --- auto=true priority=critical url=tftp://62.109.152.16
+            initrd  /d-i/n-a/stable/amd64/initrd.gz
+          }
+
+    - name: set grub default to local
+      lineinfile:
+        path: /etc/di-netboot-assistant/grub.cfg.HEAD
+        regexp: '^(\s*#|)\s*set timeout\s*='
+        line: "set timeout=10"
+
+
+    - name: set pxeboot default to local
+      lineinfile:
+        path: /etc/di-netboot-assistant/pxelinux.HEAD
+        regexp: '^(\*#|)\s*TIMEOUT'
+        line: "TIMEOUT 100"
+
+
+    - name: configure pxelinux
+      blockinfile:
+        path: /etc/di-netboot-assistant/pxelinux.HEAD
+        block: |
+          LABEL autoinstall
+            MENU LABEL Debian stable (armhf) + preseed
+            kernel stable/amd64/linux
+            append  --- auto=true priority=critical url=tftp://62.109.152.16
+            initrd stable/amd64/initrd.gz
+
+
+    - name: create PXE/UEFI config for autoinstall boot
+      block:
+        - name: set grub default to local
+          lineinfile:
+            path: /etc/di-netboot-assistant/grub.cfg.HEAD
+            regexp: "^set default="
+            line: "set default='EFI Debian stable (amd64) + preseed'"
+
+
+        - name: set pxeboot default to local
+          lineinfile:
+            path: /etc/di-netboot-assistant/pxelinux.HEAD
+            regexp: "^DEFAULT"
+            line: "DEFAULT autoinstall"
+
+
+        - name: exec di-netboot-assistant rebuild-grub
+          shell: di-netboot-assistant rebuild-grub
+
+
+        - name: exec di-netboot-assistant rebuild-menu
+          shell: di-netboot-assistant rebuild-menu
+
+
+        - name: rename default grub conf
+          shell: mv /srv/tftp/d-i/n-a/grub/grub.cfg /srv/tftp/d-i/n-a/grub/grub.cfg-autoinstall
+
+
+        - name: rename default pxelinux conf
+          shell: mv /srv/tftp/d-i/n-a/pxelinux.cfg/default /srv/tftp/d-i/n-a/pxelinux.cfg/default-autoinstall
+ 
+        - name: copy MAC-specific file for pxelinux
+          copy:
+            remote_src: yes
+            src: /srv/tftp/d-i/n-a/pxelinux.cfg/default-autoinstall
+            dest: /srv/tftp/d-i/n-a/pxelinux.cfg/01-52-54-00-58-02-7a
+
+
+        - name: copy MAC-specific file for grub
+          copy:
+            remote_src: yes
+            src: /srv/tftp/d-i/n-a/grub/grub.cfg-autoinstall
+            dest: /srv/tftp/d-i/n-a/grub/grub.cfg-52:54:00:6d:e5:3c
+   
+
+    - name: create PXE/UEFI config for inert boot
+      block:
+        - name: set grub default to local
+          lineinfile:
+            path: /etc/di-netboot-assistant/grub.cfg.HEAD
+            regexp: "^set default="
+            line: "set default='Boot from local disk..'"
+
+
+        - name: set pxeboot default to local
+          lineinfile:
+            path: /etc/di-netboot-assistant/pxelinux.HEAD
+            regexp: "^DEFAULT"
+            line: "DEFAULT bootlocal"
+
+
+        - name: exec di-netboot-assistant rebuild-grub
+          shell: di-netboot-assistant rebuild-grub
+
+        - name: exec di-netboot-assistant rebuild-menu
+          shell: di-netboot-assistant rebuild-menu
+
+ 
+        - name: rename default grub conf
+          shell: mv /srv/tftp/d-i/n-a/grub/grub.cfg /srv/tftp/d-i/n-a/grub/grub.cfg-default
+
+        - name: replace default grub conf
+          copy:
+            dest: /srv/tftp/d-i/n-a/grub/grub.cfg
+            content: |
+              source /d-i/n-a/grub/grub.cfg-$net_default_mac;
+              if [ -z "$default" ]; then
+                source /d-i/n-a/grub/grub.cfg-default;
+              fi
+
