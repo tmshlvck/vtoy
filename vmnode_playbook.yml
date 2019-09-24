@@ -15,6 +15,7 @@
           - libosinfo-bin
           - libguestfs-tools
           - virt-top
+          - ovmf
         state: present
         update_cache: yes
 
