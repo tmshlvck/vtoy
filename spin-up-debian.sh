@@ -3,10 +3,10 @@
 CLOUDIMAGE="/var/lib/libvirt/images/debian-10.1.0-openstack-amd64" # .qcow2 or .raw
 DEF_DISKSIZE="10G"
 IMAGEDIR="/var/lib/libvirt/images/"
-NET="br22"
+NET="br100"
 #STOR="qcow2"
 STORAGE="lvm"
-VG="vg0"
+VG="fast"
 
 if [ "$#" -lt 1 ]; then
     echo "Usage: $0 <virthostname> [disksize]"
