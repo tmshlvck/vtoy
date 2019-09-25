@@ -411,7 +411,7 @@
         path: /etc/di-netboot-assistant/pxelinux.HEAD
         block: |
           LABEL autoinstall
-            MENU LABEL Debian stable (armhf) + preseed
+            MENU LABEL Debian stable (amd64) + preseed
             kernel stable/amd64/linux
             append  --- auto=true priority=critical url=tftp://62.109.152.16
             initrd stable/amd64/initrd.gz
