@@ -19,6 +19,8 @@
         state: present
         update_cache: yes
 
+
+
 - hosts: 127.0.0.1
   name: prepare TLS
   connection: local
@@ -185,6 +187,12 @@
          regexp: '^[#\s]*libvirtd_opts='
          line: libvirtd_opts="--listen"
 
+    - name: change spice to listen on IPv6
+      lineinfile:
+         path: /etc/libvirt/qemu.conf
+         regexp: '^[#\s]*spice_listen\s*='
+         line: spice_listen = "::1"
+
     - name: restart libvirtd
       service:
          name: libvirtd
@@ -192,12 +200,13 @@
 
     - name: download debian openstack image
       get_url:
-        url: https://cdimage.debian.org/cdimage/openstack/current/debian-10.1.0-openstack-amd64.raw
+        url: https://cdimage.debian.org/cdimage/openstack/current-10/debian-10-openstack-amd64.raw
         dest: /var/lib/libvirt/images/
         mode: '0644'
         owner: root
         group: root
-        checksum: md5:d1adc1dacdd1c6e8d50f29b9b78a73e0
+        checksum: md5:242faa714552cebbe64d6f67e250098d
+
 
   # TODO:
   #   - LVM + pool creation in libvirt

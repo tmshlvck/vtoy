@@ -190,7 +190,6 @@
           d-i apt-setup/contrib boolean true
           
           d-i mirror/country string manual
-          #d-i mirror/http/hostname string deb.debian.org
           d-i mirror/http/hostname string debian.ignum.cz
           d-i mirror/http/directory string /debian
           d-i mirror/http/proxy string
@@ -349,6 +348,14 @@
           
           
           ############################# End of hell ########################################
+          
+          ### Clock and time zone setup
+          # Controls whether or not the hardware clock is set to UTC.
+          d-i clock-setup/utc boolean false
+
+          # You may set this to any valid setting for $TZ; see the contents of
+          # /usr/share/zoneinfo/ for valid values.
+          d-i time/zone string Europe/Prague
           
           ### Package selection
           #tasksel tasksel/first multiselect standard, ssh-server, gnome-desktop, print-server
