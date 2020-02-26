@@ -3,9 +3,19 @@
   name: prepare vmnodes
   become: yes
   tasks:
+    - name: add vtoy ppa
+      apt_repository:
+        repo: ppa:tmshlvck/vtoy
+
+    - name: bring packages to current versions
+      apt:
+        upgrade: yes
+        update_cache: yes
+
     - name: install kvm and libvirt
       apt:
         name:
+          - sudo
           - qemu-kvm
           - qemu-utils
           - libvirt-daemon-system
@@ -16,15 +26,37 @@
           - libguestfs-tools
           - virt-top
           - ovmf
+          - ceph-deploy
+          - policykit-1
         state: present
         update_cache: yes
 
+    - name: Root SSH key for Tomas Hlavacek
+      authorized_key:
+         user: root
+         state: present
+         key: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCeQg5TjzWeCC3v1meyx8sCcHi9G8mPD1J7o5R4WQYQrplfuALwAJ5v9Ne2lqZDzvQui7QvjfzkRTe/jGR35VKbOGYeaMkQ0tUEM8HimCIcjxdvdZEwGaAbMA2u3L0OXqozSmfZIURGzjf53qIkpAXkUSRrGFl0CEkWZpgDTgVTktJ7SqMnl981jAWDTHLCW7Vf+Fx+GnU1tvafWVw3qk/fTna7fobvg39fG6Ja7JqVF/qw4v74OtRfQjj6TLF03vAhdMmDPr2BVUvizVAhtqqUaJEMwF0yUIrohaDpIwiIx14op+6s9ecoj6wFrrPwknPt1xkPrd5N2VJGls+dkvEQK/GC7d8NNaXKQwQ1i9loMUhbGyalqSYCFVnYriAQMANTdqLBoLo/wqGagillgGtgZhIKIcpA+RgJ8I0FfpdDqAsrT9S9BUKMMpd9Eai9SiWmHq38XqjQwpfBEqg9hTcAwq80k9yv/Af5yJD7416N7xwRn5l4kBXbYdP5Ezwlm6yGY25OQEuz2n6izY2lZ3nHDuADsvRddpt4RdBSVDePAXeDl4nH42YxGAbgWb/vCx7RFQNdcl7F1iz3N98gaTKCOIwmqyJ3TmBp47A8Trwtol7FEpzUDI/2elOgOo2FvwlO7mp4ZAjkcFW15ca0UMCEjxx49PQ5V62Q+3DcOgGLRw== tmshlvck@gmail.com
 
+    - name: Root SSH key for MAAS
+      authorized_key:
+         user: root
+         state: present
+         key: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDH0R3e/WFqPWC6iAtOLZ+OgzMmOV51V4jzkTCgqPWXbpkzYc1BBNKytDIsk3au/lLJ2liTi6m0scY2j5UiAu1h+PcrBH0UnnOwBupjrhgSGaCxh2DpBLUGoJHXn7rIoZ9NeJhC0fkpJWVTsykUgJIUzKA8PwnafIZAA1Lkeu1KFKoGNxJMrkzS0fR+33MRD/NSgDWuTNM53EuIZ0WR0h+YxAgPKGy8MEdhXQdvjDIopsJVn2XUfFiS9KZluswbaol+d4osA2YXjQwJQEZvgSqjv8/JzLvNuLr7el9spPxLj0LMYCrwRPjzFRFa0jKl2T2YsUxKLsku2XBnz5P3PKjH maas@rackd-lab
+
+    - name: Set timezone to Asia/Tokyo
+      timezone:
+        name: Europe/Prague
 
 - hosts: 127.0.0.1
   name: prepare TLS
   connection: local
   tasks:
+    - name: install prerequisites
+      become: yes
+      apt:
+        name:
+          - gnutls-bin
+
     - name: create tls dir
       file:
         path: "{{ playbook_dir }}/tls/"
@@ -66,35 +98,7 @@
           organization = ignum.cz
           cn = {{ item }}
           tls_www_server
-          encryption_key
-          signing_key
-          expiration_days = 36500
-      with_items: "{{ groups['vmnodes'] }}"
-
-    - name: create server-cert
-      shell: certtool --generate-certificate \
-            --template "{{ playbook_dir }}/tls/{{ hostvars[item].inventory_hostname_short }}_server_template.info" \
-            --load-privkey "{{ playbook_dir }}/tls/{{ hostvars[item].inventory_hostname_short }}_server_key.pem" \
-            --load-ca-certificate "{{ playbook_dir }}/tls/certificate_authority_certificate.pem" \
-            --load-ca-privkey "{{ playbook_dir }}/tls/certificate_authority_key.pem" \
-            --outfile "{{ playbook_dir }}/tls/{{ hostvars[item].inventory_hostname_short }}_server_certificate.pem"
-      args:
-        creates: "{{ playbook_dir }}/tls/{{ hostvars[item].inventory_hostname_short }}_server_certificate.pem"
-      with_items: "{{ groups['vmnodes'] }}"
-
-    - name: create server-key
-      shell: certtool --generate-privkey >"{{ playbook_dir }}/tls/{{ hostvars[item].inventory_hostname_short }}_server_key.pem"
-      args:
-        creates: "{{ playbook_dir }}/tls/{{ hostvars[item].inventory_hostname_short }}_server_key.pem"
-      with_items: "{{ groups['vmnodes'] }}"
-
-    - name: create server-cert template
-      copy:
-        dest: "{{ playbook_dir }}/tls/{{ hostvars[item].inventory_hostname_short }}_server_template.info"
-        content: |
-          organization = ignum.cz
-          cn = {{ item }}
-          tls_www_server
+          tls_www_client
           encryption_key
           signing_key
           expiration_days = 36500
@@ -181,42 +185,176 @@
         group: root
         mode: 0644
 
+    
+- hosts: vmnodes
+  name: set libvirt listen
+  become: yes
+  tasks:
     - name: enable libvirt listen
       lineinfile:
          path: /etc/default/libvirtd
-         regexp: '^[#\s]*libvirtd_opts='
+         regexp: '^[#\s]*libvirtd_opts[\s]*='
          line: libvirtd_opts="--listen"
 
+    - name: enable libvirt listen TLS
+      lineinfile:
+         path: /etc/libvirt/libvirtd.conf
+         regexp: '^[#\s]*#listen_tls[\s]*='
+         line: listen_tls = 1
+
+    - name: mask libvirt socket activation 1
+      systemd:
+        name: libvirtd.socket
+        enabled: no
+        masked: yes
+
+    - name: mask libvirt socket activation 2
+      systemd:
+        name: libvirtd-ro.socket
+        enabled: no
+        masked: yes
+
+    - name: mask libvirt socket activation 3
+      systemd:
+        name: libvirtd-admin.socket
+        enabled: no
+        masked: yes
+
+    - name: mask libvirt socket activation 4
+      systemd:
+        name: libvirtd-tls.socket
+        enabled: no
+        masked: yes
+
+    - name: mask libvirt socket activation 5
+      systemd:
+        name: libvirtd-tcp.socket
+        enabled: no
+        masked: yes
+
+    - name: disable libvirt socket activation 6
+      lineinfile:
+         path: /lib/systemd/system/libvirtd.service
+         regexp: '^[#\s]*Requires=libvirtd.socket'
+         line: "#Requires=libvirtd.socket"
+
+    - name: disable libvirt socket activation 7
+      lineinfile:
+         path: /lib/systemd/system/libvirtd.service
+         regexp: '^[#\s]*Requires=libvirtd-ro.socket'
+         line: "#Requires=libvirtd-ro.socket"
+
+    - name: disable libvirt socket activation 8
+      lineinfile:
+         path: /lib/systemd/system/libvirtd.service
+         regexp: '^[#\s]*Requires=libvirtd-admin.socket'
+         line: "#Requires=libvirtd-admin.socket"
+
+    - name: mask libvirt socket activation 9
+      systemd:
+        daemon_reload: yes
+
+- hosts: vmnodes
+  name: setup libvirt config
+  become: yes
+  tasks: 
     - name: change spice to listen on IPv6
       lineinfile:
          path: /etc/libvirt/qemu.conf
          regexp: '^[#\s]*spice_listen\s*='
-         line: spice_listen = "::1"
+         line: spice_listen = "::"
+
+    - name: change vnc to listen on IPv6
+      lineinfile:
+         path: /etc/libvirt/qemu.conf
+         regexp: '^[#\s]*vnc_listen\s*='
+         line: vnc_listen = "::"
 
     - name: restart libvirtd
       service:
          name: libvirtd
          state: restarted
 
-    - name: download debian openstack image
-      get_url:
-        url: https://cdimage.debian.org/cdimage/openstack/current-10/debian-10-openstack-amd64.raw
-        dest: /var/lib/libvirt/images/
-        mode: '0644'
-        owner: root
-        group: root
-        checksum: md5:242faa714552cebbe64d6f67e250098d
+#    - name: download debian openstack image
+#      get_url:
+#        url: https://cdimage.debian.org/cdimage/openstack/current-10/debian-10-openstack-amd64.raw
+#        dest: /var/lib/libvirt/images/
+#        mode: '0644'
+#        owner: root
+#        group: root
+#        checksum: md5:3ff07c14e08ba99611895976582e3ea0
 
 
   # TODO:
   #   - LVM + pool creation in libvirt
-  #   - network
-
+ 
+#    - name: network
+#      copy:
+#        dest: "/etc/network/interfaces"
+#        content: |
+#          #source /etc/network/interfaces.d/*
+#
+#          auto lo
+#          iface lo inet loopback
+#
+#          {% for iface in ansible_interfaces|sort %}
+#          {% if iface.startswith('en') %}
+#          allow-hotplug {{ iface }}
+#          iface enp1s0f0 inet manual
+#
+#          {% endif %}
+#          {% endfor %}
+#
+#          auto br100
+#          iface br100 inet6 auto
+#            post-up echo 1 >/sys/class/net/br100/bridge/vlan_filtering
+#            bridge_ports {% for iface in ansible_interfaces|sort %}{% if iface.startswith('en') %}{{ iface }} {% endif %}{% endfor %}
+#
+#            bridge_stp off
+#            bridge_waitport 0
+#            bridge_fd 0
+#
+#          #iface br100 inet static
+#          #  address 62.109.152.17
+#          #  netmask 255.255.248.0
+#          #  gateway 62.109.152.1
+#
+#    - name: resolvconf
+#      copy:
+#        dest: "/etc/resolv.conf"
+#        content: |
+#          domain v.ignum.cz
+#          search v.ignum.cz
+#          nameserver 2001:1ab0:b0f4:53::53
+#          nameserver 217.31.53.53 
+#
 
 - hosts: vmnode_manager
   name: deploy vmnode manager certs
   become: yes
   tasks:
+    - name: install kvm and libvirt
+      apt:
+        name:
+          - sudo
+          - qemu-utils
+          - libvirt-daemon-system
+          - libvirt-daemon
+          - virtinst
+          - libosinfo-bin
+          - libguestfs-tools
+          - ceph-deploy
+          - policykit-1
+        state: present
+        update_cache: yes
+
+
+    - name: create CA dir
+      file:
+        path: "/etc/pki/CA/"
+        state: directory
+        mode: '0755'
+
     - name: deploy ca-cert
       copy:
         src: "{{playbook_dir}}/tls/certificate_authority_certificate.pem"
@@ -224,6 +362,12 @@
         owner: root
         group: root
         mode: 0644
+
+    - name: create libvirt dir
+      file:
+        path: "/etc/pki/libvirt/private"
+        state: directory
+        mode: '0755'
 
     - name: deploy manager-key
       copy:
@@ -247,3 +391,4 @@
          state: restarted
 
 
+    # install https://github.com/retspen/webvirtcloud
