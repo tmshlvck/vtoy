@@ -1,0 +1,178 @@
+---
+- hosts: roadrunner.v.ignum.cz
+  name: prepare container server
+  become: yes
+  tasks:
+    - name: disable cloud-init
+      file:
+        path: /etc/cloud/cloud-init.disabled
+        state: touch
+        mode: '644'
+        modification_time: preserve
+        access_time: preserve
+
+    - name: setup network
+      copy:
+        dest: /etc/network/interfaces
+        content: |
+          # This file describes the network interfaces available on your system
+          # and how to activate them. For more information, see interfaces(5).
+
+          # The loopback network interface
+          auto lo
+          iface lo inet loopback
+
+          # The normal eth0
+          allow-hotplug eth0
+          iface eth0 inet manual
+
+          auto lxcbr0
+          iface lxcbr0 inet6 static
+              address 2001:1ab0:0010:0100::0001:0010
+              netmask 64
+              bridge_ports eth0
+              bridge_stp off
+              bridge_waitport 0
+              bridge_fd 0
+
+
+    - name: setup apt
+      copy:
+        dest: /etc/apt/sources.list
+        content: |
+          deb http://debian.ignum.cz/debian buster main non-free contrib
+          deb-src http://debian.ignum.cz/debian buster main non-free contrib
+
+          deb http://security.debian.org/debian-security buster/updates main contrib non-free
+          deb-src http://security.debian.org/debian-security buster/updates main contrib non-free
+
+          # buster-updates, previously known as 'volatile'
+          deb http://debian.ignum.cz/debian buster-updates main contrib non-free
+          deb-src http://debian.ignum.cz/debian buster-updates main contrib non-free
+
+
+    - name: setup resolv.conf
+      copy:
+        dest: /etc/resolv.conf
+        content: |
+          domain v.ignum.cz
+          search v.ignum.cz
+          nameserver 2001:1ab0:b0f4:53::53
+
+
+
+    - name: remove debian cloud-init user
+      user:
+        name: debian
+        state: absent
+        remove: yes
+
+    - name: install lxc
+      apt:
+        name:
+          - lxc
+          - bridge-utils
+          - python-lxc
+          - python3-lxc
+        state: present
+        update_cache: yes
+
+
+    - name: setup lxc default
+      copy:
+        dest: /etc/lxc/default.conf
+        content: |
+          lxc.net.0.type = veth
+          lxc.net.0.link = lxcbr0
+          lxc.net.0.flags = up
+          lxc.net.0.hwaddr = 00:16:3e:xx:xx:xx
+          lxc.apparmor.profile = generated
+          lxc.apparmor.allow_nesting = 1
+          lxc.start.auto = 1
+
+
+    - name: create taz
+      lxc_container:
+        name: taz
+        container_log: true
+        template: download
+        template_options: -d debian -r buster -a amd64
+      register: create_taz
+
+    - name: setup network for taz
+      lxc_container:
+        name: taz 
+        container_command: |
+          echo "nameserver 2001:1ab0:b0f4:53::53" >/etc/resolv.conf;
+          cat >/etc/network/interfaces <<EOF
+          auto lo
+          iface lo inet loopback
+
+          auto eth0
+          iface eth0 inet6 static
+            address 2001:1ab0:0010:0100::0001:0020
+            netmask 64
+          EOF
+      when: create_taz.changed
+
+    - name: restart taz
+      lxc_container:
+        name: taz
+        state: restarted
+      when: create_taz.changed
+
+    - name: setup taz
+      lxc_container:
+        name: taz
+        container_command: |
+          apt-get -y install ssh python sudo;
+          mkdir /root/.ssh;
+          cat >/root/.ssh/authorized_keys <<EOF
+          ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCeQg5TjzWeCC3v1meyx8sCcHi9G8mPD1J7o5R4WQYQrplfuALwAJ5v9Ne2lqZDzvQui7QvjfzkRTe/jGR35VKbOGYeaMkQ0tUEM8HimCIcjxdvdZEwGaAbMA2u3L0OXqozSmfZIURGzjf53qIkpAXkUSRrGFl0CEkWZpgDTgVTktJ7SqMnl981jAWDTHLCW7Vf+Fx+GnU1tvafWVw3qk/fTna7fobvg39fG6Ja7JqVF/qw4v74OtRfQjj6TLF03vAhdMmDPr2BVUvizVAhtqqUaJEMwF0yUIrohaDpIwiIx14op+6s9ecoj6wFrrPwknPt1xkPrd5N2VJGls+dkvEQK/GC7d8NNaXKQwQ1i9loMUhbGyalqSYCFVnYriAQMANTdqLBoLo/wqGagillgGtgZhIKIcpA+RgJ8I0FfpdDqAsrT9S9BUKMMpd9Eai9SiWmHq38XqjQwpfBEqg9hTcAwq80k9yv/Af5yJD7416N7xwRn5l4kBXbYdP5Ezwlm6yGY25OQEuz2n6izY2lZ3nHDuADsvRddpt4RdBSVDePAXeDl4nH42YxGAbgWb/vCx7RFQNdcl7F1iz3N98gaTKCOIwmqyJ3TmBp47A8Trwtol7FEpzUDI/2elOgOo2FvwlO7mp4ZAjkcFW15ca0UMCEjxx49PQ5V62Q+3DcOgGLRw== tmshlvck@gmail.com
+          EOF
+          #      when: create_taz.changed
+
+
+
+    - name: create bunny
+      lxc_container:
+        name: bunny
+        container_log: true
+        template: download
+        template_options: -d debian -r buster -a amd64
+      register: create_bunny
+ 
+    - name: setup network for bunny
+      lxc_container:
+        name: bunny
+        container_command: |
+          echo "nameserver 2001:1ab0:b0f4:53::53" >/etc/resolv.conf;
+          cat >/etc/network/interfaces <<EOF
+          auto lo
+          iface lo inet loopback
+
+          auto eth0
+          iface eth0 inet6 static
+            address 2001:1ab0:0010:0100::0001:0030
+            netmask 64
+          EOF
+      when: create_bunny.changed
+
+    - name: restart bunny
+      lxc_container:
+        name: bunny
+        state: restarted
+      when: create_bunny.changed
+
+    - name: setup bunny
+      lxc_container:
+        name: bunny
+        container_command: |
+          apt-get -y install ssh python sudo;
+          mkdir /root/.ssh;
+          cat >/root/.ssh/authorized_keys <<EOF
+          ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCeQg5TjzWeCC3v1meyx8sCcHi9G8mPD1J7o5R4WQYQrplfuALwAJ5v9Ne2lqZDzvQui7QvjfzkRTe/jGR35VKbOGYeaMkQ0tUEM8HimCIcjxdvdZEwGaAbMA2u3L0OXqozSmfZIURGzjf53qIkpAXkUSRrGFl0CEkWZpgDTgVTktJ7SqMnl981jAWDTHLCW7Vf+Fx+GnU1tvafWVw3qk/fTna7fobvg39fG6Ja7JqVF/qw4v74OtRfQjj6TLF03vAhdMmDPr2BVUvizVAhtqqUaJEMwF0yUIrohaDpIwiIx14op+6s9ecoj6wFrrPwknPt1xkPrd5N2VJGls+dkvEQK/GC7d8NNaXKQwQ1i9loMUhbGyalqSYCFVnYriAQMANTdqLBoLo/wqGagillgGtgZhIKIcpA+RgJ8I0FfpdDqAsrT9S9BUKMMpd9Eai9SiWmHq38XqjQwpfBEqg9hTcAwq80k9yv/Af5yJD7416N7xwRn5l4kBXbYdP5Ezwlm6yGY25OQEuz2n6izY2lZ3nHDuADsvRddpt4RdBSVDePAXeDl4nH42YxGAbgWb/vCx7RFQNdcl7F1iz3N98gaTKCOIwmqyJ3TmBp47A8Trwtol7FEpzUDI/2elOgOo2FvwlO7mp4ZAjkcFW15ca0UMCEjxx49PQ5V62Q+3DcOgGLRw== tmshlvck@gmail.com
+          EOF
+      when: create_bunny.changed
+
+

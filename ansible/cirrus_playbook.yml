@@ -1,0 +1,88 @@
+---
+- hosts: cirrus.openavionics.eu
+  name: prepare personal puppy
+  become: yes
+  tasks:
+    - name: disable cloud-init
+      file:
+        path: /etc/cloud/cloud-init.disabled
+        state: touch
+        mode: '644'
+        modification_time: preserve
+        access_time: preserve
+
+    - name: remove debian cloud-init user
+      user:
+        name: debian
+        state: absent
+        remove: yes
+
+    - name: install basic utils
+      apt:
+        name:
+          - wget
+          - procps
+          - vim
+          - sudo
+          - nftables
+          - tcpdump
+          - bmon
+          - htop
+          - qemu-guest-agent
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg-agent
+          - software-properties-common
+        state: present
+        update_cache: yes
+
+    - name: setup firewall
+      copy:
+        dest: /etc/nftables.conf
+        content: |
+          #!/usr/sbin/nft -f
+
+          flush ruleset
+
+          table inet filter {
+            chain input {
+              type filter hook input priority 0; policy drop;
+
+              ct state {established, related} counter accept
+              ct state invalid counter drop
+
+              iifname lo accept
+
+              # allow icmp
+              ip protocol icmp counter accept
+              icmpv6 type {destination-unreachable, packet-too-big, time-exceeded, echo-request, echo-reply, mld-listener-query, mld-listener-report, mld-listener-reduction, nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert, nd-redirect, parameter-problem, router-renumbering} accept
+
+              # allow ssh
+              tcp dport ssh counter accept
+
+              # allow http and https
+              tcp dport http,https counter accept
+
+              # allow traceroute
+              udp dport 33434-33524 counter accept
+            }
+
+            chain forward {
+              type filter hook forward priority 0; policy drop;
+            }
+
+            chain output {
+              type filter hook output priority 0; policy accept;
+            }
+          }
+
+    - name: restart nft
+      service:
+        name: nftables.service
+        state: restarted
+        enabled: yes
+
+
+
+

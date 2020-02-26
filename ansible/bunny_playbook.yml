@@ -1,0 +1,294 @@
+---
+- hosts: bunny.v.ignum.cz
+  name: prepare vtoy master
+  become: yes
+  vars:
+     ipv4_addr: 62.109.152.16
+     ipv6_addr: 2001:1ab0:10:100::1:30
+  tasks:
+#    - name: disable cloud-init
+#      file:
+#        path: /etc/cloud/cloud-init.disabled
+#        state: touch
+#        mode: '644'
+#        modification_time: preserve
+#        access_time: preserve
+
+    - name: setup network
+      copy:
+        dest: /etc/network/interfaces
+        content: |
+          # This file describes the network interfaces available on your system
+          # and how to activate them. For more information, see interfaces(5).
+
+          # The loopback network interface
+          auto lo
+          iface lo inet loopback
+
+          # The normal eth0
+          auto eth0
+          iface eth0 inet static
+              address {{ ipv4_addr }}
+              netmask 255.255.248.0
+              gateway 62.109.152.1
+
+          iface eth0 inet6 static
+              address {{ ipv6_addr }}
+              netmask 64
+
+    - name: remove debian cloud-init user
+      user:
+        name: debian
+        state: absent
+        remove: yes
+
+    - name: install basic utils
+      apt:
+        name:
+          - wget
+          - iputils-ping
+          - procps
+          - vim
+          - sudo
+        state: present
+        update_cache: yes
+
+    - name: install kvm and libvirt
+      apt:
+        name:
+          - qemu-kvm
+          - qemu-utils
+          - libvirt-daemon-system
+          - libvirt-daemon
+          - virtinst
+          - bridge-utils
+          - libosinfo-bin
+          - libguestfs-tools
+          - virt-top
+        state: present
+        update_cache: yes
+
+    - name: install PXE infrastructure
+      apt:
+        name:
+          - isc-dhcp-server
+          - tftpd-hpa
+          - di-netboot-assistant
+        state: present
+
+    - name: setup DHCP
+      copy:
+        dest: /etc/dhcp/dhcpd.conf
+        content: |
+          ddns-update-style none;
+          default-lease-time 600;
+          max-lease-time 7200;
+          
+          allow booting;
+          
+          option arch code 93 = unsigned integer 16;
+          
+          subnet 62.109.152.0 netmask 255.255.248.0 {
+             range 62.109.152.10 62.109.152.15 ;
+             option routers 62.109.152.1;
+             option domain-name-servers 217.31.53.53;
+             option domain-name "v.ignum.cz";
+             allow unknown-clients;
+             next-server {{ ipv4_addr }};
+             if option arch = 00:07 {
+               filename "d-i/n-a/bootnetx64.efi";
+             } else {
+               filename "d-i/n-a/pxelinux.0";
+             }
+          }
+ 
+    - name: setup DHCPv6
+      copy:
+        dest: /etc/dhcp/dhcpd6.conf
+        content: |
+          default-lease-time 2592000;
+          preferred-lifetime 604800;
+          option dhcp-renewal-time 3600;
+          option dhcp-rebinding-time 7200;
+
+          allow leasequery;
+
+
+          option dhcp6.bootfile-url code 59 = string;
+          option dhcp6.client-arch-type code 61 = array of unsigned integer 16;
+
+          option dhcp6.name-servers 2001:1ab0:b0f4:53::53;
+          option dhcp6.domain-search "v.ignum.cz","ignum.cz";
+
+          if option dhcp6.client-arch-type = 00:07 {
+            option dhcp6.bootfile-url "tftp://[{{ ipv6_addr }}]/bootx64.efi";
+          } else {
+            option dhcp6.bootfile-url "tftp://[{{ ipv6_addr }}]/pxelinux.0";
+          }
+
+          subnet6 2001:1ab0:10:100::/64 {
+            range6 2001:1ab0:10:100::1:100 2001:1ab0:10:100::1:ffff;
+          }
+
+ 
+    
+    - name: set dhcp listen interfaces IPv4
+      lineinfile:
+        path: /etc/default/isc-dhcp-server
+        regexp: '^INTERFACESv4='
+        line: 'INTERFACESv4="eth0"'
+
+#    - name: set dhcp listen interfaces IPv6
+#      lineinfile:
+#        path: /etc/default/isc-dhcp-server
+#        regexp: '^INTERFACESv6='
+#        line: 'INTERFACESv6="eth0"'
+
+
+    - name: restart isc-dhcp-server
+      service:
+        name: isc-dhcp-server
+        state: restarted
+
+
+    - name: create d-i structure
+      file:
+        path: /srv/tftp/d-i/buster/
+        state: directory
+        recurse: yes
+        owner: root
+        group: root
+
+
+    - name: setup preseed
+      copy:
+        src: files/preseed.cfg
+        dest: /srv/tftp/d-i/buster/preseed.cfg
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: set dhcp listen interfaces IPv4
+      lineinfile:
+        path: /etc/di-netboot-assistant/di-netboot-assistant.conf
+        regexp: '^TFTP_ROOT='
+        line: 'TFTP_ROOT=/srv/tftp'
+
+
+    - name: exec di-netboot-assistant install stable
+      shell: di-netboot-assistant --ignore-sig install stable
+
+    - name: configure grub for UEFI
+      blockinfile:
+        path: /etc/di-netboot-assistant/grub.cfg.HEAD
+        block: |
+          menuentry 'EFI Debian stable (amd64) + preseed' {
+            linux   /d-i/n-a/stable/amd64/linux --- auto=true priority=critical url=tftp://{{ ipv4_addr }}
+            initrd  /d-i/n-a/stable/amd64/initrd.gz
+          }
+
+    - name: set grub default to local
+      lineinfile:
+        path: /etc/di-netboot-assistant/grub.cfg.HEAD
+        regexp: '^(\s*#|)\s*set timeout\s*='
+        line: "set timeout=10"
+
+
+    - name: set pxeboot default to local
+      lineinfile:
+        path: /etc/di-netboot-assistant/pxelinux.HEAD
+        regexp: '^(\*#|)\s*TIMEOUT'
+        line: "TIMEOUT 100"
+
+
+    - name: configure pxelinux
+      blockinfile:
+        path: /etc/di-netboot-assistant/pxelinux.HEAD
+        block: |
+          LABEL autoinstall
+            MENU LABEL Debian stable (amd64) + preseed
+            kernel stable/amd64/linux
+            append  --- auto=true priority=critical url=tftp://{{ ipv4_addr }}
+            initrd stable/amd64/initrd.gz
+
+
+    - name: create PXE/UEFI config for autoinstall boot
+      block:
+        - name: set grub default to local
+          lineinfile:
+            path: /etc/di-netboot-assistant/grub.cfg.HEAD
+            regexp: "^set default="
+            line: "set default='EFI Debian stable (amd64) + preseed'"
+
+
+        - name: set pxeboot default to local
+          lineinfile:
+            path: /etc/di-netboot-assistant/pxelinux.HEAD
+            regexp: "^DEFAULT"
+            line: "DEFAULT autoinstall"
+
+
+        - name: exec di-netboot-assistant rebuild-grub
+          shell: di-netboot-assistant rebuild-grub
+
+
+        - name: exec di-netboot-assistant rebuild-menu
+          shell: di-netboot-assistant rebuild-menu
+
+
+        - name: rename default grub conf
+          shell: mv /srv/tftp/d-i/n-a/grub/grub.cfg /srv/tftp/d-i/n-a/grub/grub.cfg-autoinstall
+
+
+        - name: rename default pxelinux conf
+          shell: mv /srv/tftp/d-i/n-a/pxelinux.cfg/default /srv/tftp/d-i/n-a/pxelinux.cfg/default-autoinstall
+ 
+        - name: copy MAC-specific file for pxelinux
+          copy:
+            remote_src: yes
+            src: /srv/tftp/d-i/n-a/pxelinux.cfg/default-autoinstall
+            dest: /srv/tftp/d-i/n-a/pxelinux.cfg/01-52-54-00-58-02-7a
+
+
+        - name: copy MAC-specific file for grub
+          copy:
+            remote_src: yes
+            src: /srv/tftp/d-i/n-a/grub/grub.cfg-autoinstall
+            dest: /srv/tftp/d-i/n-a/grub/grub.cfg-52:54:00:6d:e5:3c
+   
+
+    - name: create PXE/UEFI config for inert boot
+      block:
+        - name: set grub default to local
+          lineinfile:
+            path: /etc/di-netboot-assistant/grub.cfg.HEAD
+            regexp: "^set default="
+            line: "set default='Boot from local disk..'"
+
+
+        - name: set pxeboot default to local
+          lineinfile:
+            path: /etc/di-netboot-assistant/pxelinux.HEAD
+            regexp: "^DEFAULT"
+            line: "DEFAULT bootlocal"
+
+
+        - name: exec di-netboot-assistant rebuild-grub
+          shell: di-netboot-assistant rebuild-grub
+
+        - name: exec di-netboot-assistant rebuild-menu
+          shell: di-netboot-assistant rebuild-menu
+
+ 
+        - name: rename default grub conf
+          shell: mv /srv/tftp/d-i/n-a/grub/grub.cfg /srv/tftp/d-i/n-a/grub/grub.cfg-default
+
+        - name: replace default grub conf
+          copy:
+            dest: /srv/tftp/d-i/n-a/grub/grub.cfg
+            content: |
+              source /d-i/n-a/grub/grub.cfg-$net_default_mac;
+              if [ -z "$default" ]; then
+                source /d-i/n-a/grub/grub.cfg-default;
+              fi
+
