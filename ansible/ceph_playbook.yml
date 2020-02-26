@@ -1,0 +1,115 @@
+---
+- hosts: vmnodes:vmnode_manager
+  name: prepare ceph environment
+  become: yes
+  tasks:
+    - name: add ceph key
+      apt_key:
+        url: https://download.ceph.com/keys/release.asc
+        state: present
+
+    - name: add ceph repo
+      apt_repository:
+        repo: deb https://download.ceph.com/debian-mimic/ bionic main
+        state: present
+
+    - name: install ceph-deploy and other needed packages
+      apt:
+        name:
+          - ceph-deploy
+          - policykit-1
+          - chrony
+        state: present
+        update_cache: yes
+      
+    - name: create hosts
+      copy:
+        dest: "/etc/hosts"
+        content: |
+          127.0.0.1 localhost
+
+          ::1 ip6-localhost ip6-loopback
+          fe00::0 ip6-localnet
+          ff00::0 ip6-mcastprefix
+          ff02::1 ip6-allnodes
+          ff02::2 ip6-allrouters
+          ff02::3 ip6-allhosts
+
+          192.168.2.10 lab01
+          192.168.2.11 lab02
+          192.168.2.12 lab09
+          192.168.2.13 lab10
+
+
+
+- hosts: lab01.maas.ignum.cz
+  name: deploy ceph
+  tasks:
+    - name: create ssh conf
+      copy:
+        dest: "~/.ssh/config"
+        content: |
+          Host lab01
+            Hostname 192.168.2.10
+          Host lab02
+            Hostname 192.168.2.11
+          Host lab09
+            Hostname 192.168.2.12
+          Host lab10
+            Hostname 192.168.2.13
+
+#    - name: create cluster
+#      shell: ceph-deploy new lab01 lab02 lab09
+
+
+       echo "public network = 192.168.2.0/24" >> ceph.conf
+       ceph-deploy install lab01 lab02 lab09 lab10
+       ceph-deploy mon create-initial
+       ceph-deploy osd create --data /dev/sdb2 lab01
+       ceph-deploy osd create --data /dev/sdb2 lab01
+       ceph-deploy osd create --data /dev/sda2 lab09
+       ...
+       ceph-deploy mds create lab01 lab09
+       sudo ceph osd pool autoscale-status
+       sudo ceph osd pool create core 100
+       sudo ceph osd pool set core pg_autoscale_mode on
+       ceph-deploy admin lab01 lab02 lab09 lab10
+
+
+       sudo ceph auth get-or-create client.libvirt mon 'allow r' osd 'allow rwx' >ceph.client.libvirt.keyring
+       #       UUID="$(uuidgen)"
+       export UUID="97d22b3c-2629-4722-8acc-6fc0d28262f4" # must be same on all hosts
+       cat >secret.xml <<EOF
+<secret ephemeral='no' private='no'>
+  <uuid>${UUID}</uuid>
+  <usage type='ceph'>
+    <name>client.libvirt secret</name>
+  </usage>
+</secret>
+EOF
+       sudo virsh secret-define --file "secret.xml"
+       sudo virsh secret-set-value --secret "${UUID}" --base64 "$(sudo ceph auth get-key client.libvirt)"
+
+       cat >core.xml <<EOF
+<pool type="rbd">
+  <name>core</name>
+  <source>
+    <name>core</name>
+    <host name='lab01'/>
+    <auth username='libvirt' type='ceph'>
+      <secret uuid='${UUID}'/>
+    </auth>
+  </source>
+</pool>
+EOF
+
+       sudo virsh pool-define core.xml
+       sudo virsh pool-autostart core
+       sudo virsh pool-start core
+
+       # this is the guide for automating RBD pool deployment https://blog.modest-destiny.com/posts/kvm-libvirt-add-ceph-rbd-pool/
+
+       # migration
+       sudo qemu-img info /mnt/taz.qcow2
+       sudo qemu-img convert -f qcow2 -O raw /mnt/taz.qcow2 rbd:core/taz
+
