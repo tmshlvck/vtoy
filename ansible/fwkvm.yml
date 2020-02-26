@@ -1,0 +1,35 @@
+---
+- hosts: fwkvm
+  name: prepare vmnodes
+  become: yes
+  tasks:
+    - name: install kvm and libvirt
+      apt:
+        name:
+          - sudo
+          - qemu-kvm
+          - qemu-utils
+          - libvirt-daemon-system
+          - libvirt-daemon
+          - virtinst
+          - bridge-utils
+          - libosinfo-bin
+          - libguestfs-tools
+          - virt-top
+          - ovmf
+        state: present
+        update_cache: yes
+
+
+    - name: dns
+      copy:
+        dest: "/etc/resolv.conf"
+        content: |
+          domain core.ignum.cz
+          search core.ignum.cz
+          nameserver 2001:1ab0:b0f4:53::53
+          nameserver 217.31.53.53 
+
+
+
+
