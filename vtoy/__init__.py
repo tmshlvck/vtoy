@@ -4,6 +4,7 @@ import sys
 import libvirt
 from xml.dom import minidom
 import threading
+import subprocess
 import time
 
 def humanbytes(B):
@@ -76,30 +77,58 @@ def do_migrate(srcconn, dstconn, dom_name):
         raise Exception('Migration to the new domain failed')
 
 
-def do_domcopy(srcconn, dstconn, dom_name):
+LVMCP_BIN = 'sudo ~/lvmcp.py'
+
+def run_inthread(uri, command, params=[], output_callback=None):
+    def run(uri, command, params, output_callback=None):
+        method,user,host,res = parse_uri(uri)
+        conn = (('%s@%s' % (user,host)) if user else host)
+        c = "ssh %s -- '%s %s'" % (conn, command, ' '.join(params))
+        print("Running command: %s" % c)
+        p = subprocess.Popen(c, shell=True, stdout=subprocess.PIPE)
+        for l in p.stdout.readlines():
+            if output_callback:
+                output_callback(l)
+        ret = p.poll()
+        print("Command: %s finished with return code %s" % (c, str(ret)))
+
+    t = threading.Thread(target=run, args=(uri, command, params, output_callback))
+    t.start()
+    return t
+
+
+def parse_uri(uri):
+    """ example: qemu+ssh://root@vmnodefw02.core.ignum.cz/system """
+    method, loc = uri.split("://")
+    conn,res = loc.split("/")
+    if conn.find('@') >= 0:
+        user,host = conn.split('@')
+    else:
+        user = ''
+        host = conn
+    return((method,user,host,res))
+
+
+def do_domcopy(srcconn, dstconn, dom_name, src_uri, dst_uri):
     dom = srcconn.lookupByName(dom_name)
     if not dom:
         raise Exception('Failed to find the domain %s' % domName)
 
     blkdevs = list(list_blkdevs(srcconn, dom_name))
     for bd_pool, bd_name in blkdevs:
-        print("Found blockdev /dev/%s/%s" % (bd_pool, bd_name))
+        blkdev = '/dev/%s/%s' % (bd_pool, bd_name)
+        print("Found blockdev %s" % blkdev)
         vname, vtype, vsize, sv = get_lv(srcconn, bd_pool, bd_name)
         if vtype != libvirt.VIR_STORAGE_VOL_BLOCK:
             raise Exception("Wrong type of source blockdev: %d" % vtype)
         print("Found matching source storage: vg %s lv %s size %d" % (bd_pool, vname, vsize)) 
 
-        dp = dstconn.storagePoolLookupByName(bd_pool)
-        if not dp:
-            raise Exception('Failed to find destination storage pool %s' % bd_pool)
+        dst_meth,dst_user,dst_host,dst_res = parse_uri(dst_uri)
+        dt = run_inthread(dst_uri, LVMCP_BIN, ['-d %s' % blkdev])
+        st = run_inthread(src_uri, LVMCP_BIN, ['-s %s' % blkdev, '-p %s' % dst_host, '-r 10'])
 
-        dv = dp.storageVolLookupByName(vname)
-        if not dv:
-            raise Exception('Failed to find destination volume %s in storage pool %s' % (vname, bd_pool))
-
-#        cpystr = dstconn.newStream()
-#        dv.upload(cpystr, 0, vsize)
-#        sv.download(cpystr, 0, vsize)
+        st.join()
+        dt.join()
 
     raw_xml = dom.XMLDesc(libvirt.VIR_DOMAIN_XML_MIGRATABLE)
     dstconn.defineXML(raw_xml)
@@ -232,7 +261,7 @@ def migrate(suri, duri, dom_name, force=False, remove_src=False):
         print("Migration finished.")
     else:
         print("Domain copy started...")
-        do_domcopy(srcconn, dstconn, dom_name)
+        do_domcopy(srcconn, dstconn, dom_name, suri, duri)
         print("Domain copy finished.")
 
     if remove_src:
