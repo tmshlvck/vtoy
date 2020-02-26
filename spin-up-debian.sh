@@ -1,6 +1,6 @@
 #!/bin/bash
 
-CLOUDIMAGE="/var/lib/libvirt/images/debian-10.1.0-openstack-amd64" # .qcow2 or .raw
+CLOUDIMAGE="/var/lib/libvirt/images/debian-10-openstack-amd64" # .qcow2 or .raw
 DEF_DISKSIZE="10G"
 IMAGEDIR="/var/lib/libvirt/images/"
 NET="br100"
@@ -53,28 +53,21 @@ if [ -z "${DISK}" ]; then
   exit -1
 fi
 
+VICOMM="virt-install --connect qemu:///system \
+         -n $1 \
+         -r 1024 \
+         --import \
+         --disk $DISK \
+         --disk path=${CIMG} \
+	 --os-type=linux \
+	 --os-variant=debiantesting \
+	 --graphics spice,listen=::1 \
+	 --autostart \
+	 --cpu Nehalem-IBRS"
 
 if [ -n "${NET}" ]; then
-	virt-install --connect qemu:///system \
-         -n $1 \
-         -r 1024 \
-         --import \
-         --disk $DISK \
-         --disk path=${CIMG} \
-	 --network bridge=${NET},model=virtio \
-	 --os-type=linux \
-	 --os-variant=debiantesting \
-	 --graphics spice \
-	 --cpu Nehalem-IBRS
-else
-	virt-install --connect qemu:///system \
-         -n $1 \
-         -r 1024 \
-         --import \
-         --disk $DISK \
-         --disk path=${CIMG} \
-	 --os-type=linux \
-	 --os-variant=debiantesting \
-	 --graphics spice \
-	 --cpu Nehalem-IBRS
+	VICOMM="$VICOMM \
+         --network bridge=${NET},model=virtio"
 fi
+
+$VICOMM
