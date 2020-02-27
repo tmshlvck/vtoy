@@ -1,0 +1,312 @@
+---
+- hosts: osmirror.v.ignum.cz
+  name: prepare a goodie
+  become: yes
+  tasks:
+    - name: disable cloud-init
+      file:
+        path: /etc/cloud/cloud-init.disabled
+        state: touch
+        mode: '644'
+        modification_time: preserve
+        access_time: preserve
+
+    - name: remove debian cloud-init user
+      user:
+        name: debian
+        state: absent
+        remove: yes
+
+    - name: install basic utils
+      apt:
+        name:
+          - wget
+          - procps
+          - vim
+          - sudo
+          - nftables
+          - tcpdump
+          - bmon
+          - htop
+          - qemu-guest-agent
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg-agent
+          - software-properties-common
+          - rsync
+        state: present
+        update_cache: yes
+
+    - name: setup firewall
+      copy:
+        dest: /etc/nftables.conf
+        content: |
+          #!/usr/sbin/nft -f
+
+          flush ruleset
+
+          table inet filter {
+            chain input {
+              type filter hook input priority 0; policy drop;
+
+              ct state {established, related} counter accept
+              ct state invalid counter drop
+
+              iifname lo accept
+
+              # allow icmp
+              ip protocol icmp counter accept
+              icmpv6 type {destination-unreachable, packet-too-big, time-exceeded, echo-request, echo-reply, mld-listener-query, mld-listener-report, mld-listener-reduction, nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert, nd-redirect, parameter-problem, router-renumbering} accept
+
+              # allow ssh
+              tcp dport ssh counter accept
+
+              # allow http and https
+              tcp dport {http,https} counter accept
+
+              # allow traceroute
+              udp dport 33434-33524 counter accept
+            }
+
+            chain forward {
+              type filter hook forward priority 0; policy drop;
+            }
+
+            chain output {
+              type filter hook output priority 0; policy accept;
+            }
+          }
+
+    - name: restart nft
+      service:
+        name: nftables.service
+        state: restarted
+        enabled: yes
+
+
+    - name: create log dir
+      file:
+        path: '/var/log/mirror/'
+        state: directory
+        owner: 'www-data'
+        group: 'www-data'
+        mode: '0755'
+
+
+
+    - name: create debian mirror dir
+      file:
+        path: '/srv/mirror/debian/'
+        state: directory
+        owner: 'www-data'
+        group: 'www-data'
+        mode: '0755'
+
+    - name: debian-sync script
+      copy:
+        src: files/mirror/debian-sync
+        dest: /usr/local/bin/debian-sync
+        mode: '0755'
+
+    - name: debian-sync script debian-sync.conf
+      copy:
+        src: mirror/etc/debian-sync.conf
+        dest: /usr/local/etc/debian-sync.conf
+
+    - name: debian-sync script common
+      copy:
+        src: mirror/etc/common
+        dest: /usr/local/etc/common
+
+    - name: debain-sync cronjob
+      cron:
+        name: "debian-sync"
+        minute: "0"
+        hour: "*/4"
+        job: "/usr/local/bin/debian-sync >/dev/null"
+        state: absent
+
+
+
+
+    - name: create debian mirror dir
+      file:
+        path: '/srv/mirror/debian-cd/'
+        state: directory
+        owner: 'www-data'
+        group: 'www-data'
+        mode: '0755'
+
+    - name: debian-cd-sync script
+      copy:
+        src: files/mirror/debian-cd-sync.sh
+        dest: /usr/local/bin/debian-cd-sync.sh
+        mode: '0755'
+
+    - name: debain-cd cronjob
+      cron:
+        name: "debian-cd-sync.sh"
+        minute: "0"
+        hour: "*/4"
+        job: "/usr/local/bin/debian-cd-sync.sh >/dev/null"
+        state: absent
+
+
+
+    - name: debian security mirror dir
+      file:
+        path: '/srv/mirror/debian-security'
+        state: directory
+        owner: 'www-data'
+        group: 'www-data'
+        mode: '0755'
+
+    - name: debian-security-sync script
+      copy:
+        src: files/mirror/sync-debian-security.sh
+        dest: /usr/local/bin/sync-debian-security.sh
+        mode: '0755'
+
+    - name: debain-security-cronjob
+      cron:
+        name: "sync-debian-security.sh"
+        minute: "0"
+        hour: "*/4"
+        job: "/usr/local/bin/sync-debian-security.sh >/dev/null"
+        state: absent
+
+# ubuntu
+
+    - name: ubuntu-releases mirror dir
+      file:
+        path: '/srv/mirror/ubuntu-releases'
+        state: directory
+        owner: 'www-data'
+        group: 'www-data'
+        mode: '0755'
+
+    - name: ubuntu-releases-sync.sh script
+      copy:
+        src: files/mirror/ubuntu-releases-sync.sh
+        dest: /usr/local/bin/ubuntu-releases-sync.sh
+        mode: '0755'
+
+    - name: ubuntu-releases-cronjob
+      cron:
+        name: "ubuntu-releases-sync.sh"
+        minute: "10"
+        hour: "*/4"
+        job: "/usr/local/bin/ubuntu-releases-sync.sh >/dev/null"
+        state: absent
+
+
+
+
+    - name: ubuntu archive mirror dir
+      file:
+        path: '/srv/mirror/ubuntu'
+        state: directory
+        owner: 'www-data'
+        group: 'www-data'
+        mode: '0755'
+
+    - name: ubuntu-archive-sync.sh script
+      copy:
+        src: files/mirror/ubuntu-archive-sync.sh
+        dest: /usr/local/bin/ubuntu-archive-sync.sh
+        mode: '0755'
+
+    - name: ubuntu-archive-cronjob
+      cron:
+        name: "ubuntu-archive-sync.sh"
+        minute: "30"
+        hour: "*/4"
+        job: "/usr/local/bin/ubuntu-archive-sync.sh >/dev/null"
+        state: absent
+
+
+
+# mint
+    - name: linuxmint mirror dir
+      file:
+        path: '/srv/mirror/linuxmint/'
+        state: directory
+        owner: 'www-data'
+        group: 'www-data'
+        mode: '0755'
+
+    - name: linuxmint cronjob
+      cron:
+        name: "linuxmint"
+        minute: "0"
+        hour: "*"
+        job: "rsync -av --delete rsync-packages.linuxmint.com::packages /srv/mirror/linuxmint/
+ >/dev/null"
+        state: absent
+
+    - name: linuxmint-cd mirror dir
+      file:
+        path: '/srv/mirror/linuxmint-cd/linuxmint.com/'
+        state: directory
+        owner: 'www-data'
+        group: 'www-data'
+        mode: '0755'
+
+    - name: linuxmint-cd cronjob
+      cron:
+        name: "linuxmint-cd"
+        minute: "0"
+        hour: "*"
+        job: "mirrorlinuxmint rsync -avL --delete pub.linuxmint.com::pub /srv/mirror/linuxmint-cd/linuxmint.com/ >/dev/null"
+        state: absent
+
+
+    - name: install web
+      apt:
+        name:
+          - nginx
+          - certbot
+          - python-certbot-nginx
+        state: present
+        update_cache: yes
+
+
+#    - name: run certbot
+#      shell: certbot --nginx
+
+
+
+    - name: nginx mirror conf
+      copy:
+        dest: '/etc/nginx/sites-available/mirror'
+        content: |
+          server {
+            listen 80 default_server;
+            listen [::]:80 default_server;
+            root /srv/mirror;
+
+            index index.html index.htm;
+
+            server_name _;
+
+            location / {
+              autoindex on;
+              try_files $uri $uri/ =404;
+            }
+          }
+
+    - name: nginx default link
+      file:
+        path: '/etc/nginx/sites-enabled/default'
+        src: '/etc/nginx/sites-available/mirror'
+        state: link
+        owner: 'root'
+        group: 'root'
+
+    - name: restart nginx
+      service:
+         name: nginx
+         state: restarted
+
+
