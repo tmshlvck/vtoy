@@ -62,7 +62,7 @@
               tcp dport ssh counter accept
 
               # allow http and https
-              tcp dport http,https counter accept
+              tcp dport {http,https} counter accept
 
               # allow traceroute
               udp dport 33434-33524 counter accept
