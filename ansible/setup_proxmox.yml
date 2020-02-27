@@ -32,3 +32,21 @@
       apt:
         upgrade: dist
 
+
+- hosts: lab01.v.ignum.cz
+  name: setup ceph specifics
+  become: yes
+  tasks:
+    - name: install Ceph dashboard
+      package:
+        name: ceph-mgr-dashboard
+        state: present
+
+    - name: enable dashboard
+      shell: ceph mgr module enable dashboard
+
+    - name: setup dashboard cert
+      shell: ceph dashboard create-self-signed-cert
+
+    - name: set dashboard username
+      shell: ceph dashboard ac-user-create root showmeceph administrator
