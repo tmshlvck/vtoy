@@ -125,7 +125,7 @@
         minute: "0"
         hour: "*/4"
         job: "/usr/local/bin/debian-sync >/dev/null"
-        state: absent
+        #state: absent
 
 
 
@@ -150,7 +150,7 @@
         minute: "0"
         hour: "*/4"
         job: "/usr/local/bin/debian-cd-sync.sh >/dev/null"
-        state: absent
+        #state: absent
 
 
 
@@ -174,7 +174,7 @@
         minute: "0"
         hour: "*/4"
         job: "/usr/local/bin/sync-debian-security.sh >/dev/null"
-        state: absent
+        #state: absent
 
 # ubuntu
 
@@ -198,7 +198,7 @@
         minute: "10"
         hour: "*/4"
         job: "/usr/local/bin/ubuntu-releases-sync.sh >/dev/null"
-        state: absent
+        #state: absent
 
 
 
@@ -223,7 +223,7 @@
         minute: "30"
         hour: "*/4"
         job: "/usr/local/bin/ubuntu-archive-sync.sh >/dev/null"
-        state: absent
+        #state: absent
 
 
 
@@ -243,7 +243,7 @@
         hour: "*"
         job: "rsync -av --delete rsync-packages.linuxmint.com::packages /srv/mirror/linuxmint/
  >/dev/null"
-        state: absent
+        #state: absent
 
     - name: linuxmint-cd mirror dir
       file:
@@ -259,7 +259,7 @@
         minute: "0"
         hour: "*"
         job: "mirrorlinuxmint rsync -avL --delete pub.linuxmint.com::pub /srv/mirror/linuxmint-cd/linuxmint.com/ >/dev/null"
-        state: absent
+        #state: absent
 
 
     - name: install web
